@@ -1,10 +1,18 @@
+#-----Header-----#
+#This file contains a Mueller matrix model for Irdis/SPHERE.
+#A class MatrixModel is created that stores all model parameters.
+#The class simulates the propagation of light through the system.
+#--/--Header--/--#
+
+#-----Imports-----#
 import matplotlib.pyplot as plt
 import numpy as np
 import Methods as Mt
+#--/--Imports--/--#
 
 #-----Classes-----#
 
-#The optical system of sphere for a specific wavelength
+#The optical system of SPHERE for a specific wavelength
 class MatrixModel():
     
     def __init__(self,Name,E_Hwp,R_Hwp,DeltaHwp,E_Der,R_Der,DeltaDer,d,DeltaCal,E_UT,R_UT):
@@ -22,9 +30,26 @@ class MatrixModel():
         self.R_UT = R_UT *np.pi/180
 
         
-    #Does intensity measurement with given system parameters
-    def IntensityMatrix(self,ThetaHwp,D_Sign,ThetaDer,Altitude,UsePolarizer=False,UseSource=False):
-        M_CI = 0.5*Mt.ComMatrix(self.d*D_Sign,0) #Polarizer for double difference
+    def MakeIntensityMatrix(self,ThetaHwp,D_Sign,ThetaDer,Altitude,UsePolarizer=False,UseSource=False):
+        '''
+        Summary:     
+            Creates the total mueller matrix of the system(No single/double difference).
+            This matrix can only be used to measure the intensity of outcoming light for a 
+            specific setup.
+        Input:
+            ThetaHwp: Half-waveplate angle (radians)
+            D_Sign: Sign of the P0-90 polarizer matrix, should be either 1 or -1
+            ThetaDer: Derotator angle (radians)
+            Altitude: Altitude angle (radians). Not used when UseSource is True
+            UsePolarizer: Wheter or not the calibration polarizer is used.
+            UseSource: Wheter or not the internal light source is used. 
+            When used S_In needs to take Mirror 4 into acount.
+        Output:
+            IntensityMatrix: Use like this --> Intensity = np.dot(IntensityMatrix,S_In)[0]
+            where intensity is a float and S_In is the incoming stokes vector.
+            Don't take [1],[2] or [3], these are not actually measured.
+        '''
+        M_CI = 0.5*Mt.ComMatrix(self.d*D_Sign,0) #Polarizer for single difference
         
         T_DerMin = Mt.RotationMatrix(-(ThetaDer+self.DeltaDer)) #Derotator with rotation
         M_Der = Mt.ComMatrix(self.E_Der,self.R_Der)
@@ -40,49 +65,82 @@ class MatrixModel():
         Ta = Mt.RotationMatrix(Altitude) #Telescope mirrors with rotation
         M_UT = Mt.ComMatrix(self.E_UT,self.R_UT)
 
-        #TEST - REMOVE LATER
-        #M_M4 = Mt.ComMatrix(0.00985,175*np.pi/180)
-
+        IntensityMatrix
         if(UseSource): #If using internal calibration source
  
             if(UsePolarizer):
-                return np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus,T_Cal,M_Polarizer])
+                IntensityMatrix = np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus,T_Cal,M_Polarizer])
             else:
-                return np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus])
+                IntensityMatrix = np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus])
         else:
-
             if(UsePolarizer):
-                return np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus,T_Cal,M_Polarizer,Ta,M_UT])
+                IntensityMatrix = np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus,T_Cal,M_Polarizer,Ta,M_UT])
             else:
-                return np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus,Ta,M_UT])
+                IntensityMatrix = np.linalg.multi_dot([M_CI,T_DerMin,M_Der,T_DerPlus,T_HwpMin,M_Hwp,T_HwpPlus,Ta,M_UT])
+
+        return IntensityMatrix
         
 
-    #Calculates a stokes parameter using the double difference method
-    def ParameterMatrix(self,ThetaHwpPlus,ThetaHwpMin,ThetaDer,Altitude,UsePolarizer=False,UseSource=False,DerotatorMethod=False):
-        IntensityMatrix = lambda ThetaHwp,D_Sign : self.IntensityMatrix(ThetaHwp,D_Sign,ThetaDer,Altitude,UsePolarizer,UseSource)
+    def MakeParameterMatrix(self,ThetaHwpPlus,ThetaHwpMin,ThetaDer,Altitude,UsePolarizer=False,UseSource=False,DerotatorMethod=False):
+
+        '''
+        Summary:     
+            Creates a matrix that is used to find a stokes parameter (Q or U).
+            Parameter matrix is found using double difference method.
+        Input:
+            ThetaHwpPlus: Smallest Half-wave plate angle (radians). 0 for Q, (1/8)pi for U.
+            ThetaHwpMin: Biggest Half-wave plate angle (radians). (1/2)pi for Q, (3/8)pi for U.
+            ThetaDer: Derotator angle (radians).
+            Altitude: Altitude angle (radians).
+            UsePolarizer: Wheter or not the calibration polarizer is used.
+            UseSource: Wheter or not the internal light source is used
+            DerotatorMethod: If true then take double difference using measurements 
+            with different derotator angles. ThetaHwpPlus and ThetaHwpMin are now derotator angles.
+            ThetaDer is now a Hwp angle.
+
+        Output:
+            X_Matrix: Use Like this --> X = np.dot(X_Matrix,S_In)[0]
+            This returns a stokes parameter like Q or U.
+            I_Matrix: Use Like this --> I = np.dot(I_Matrix,S_In)[0]
+            X/I is then the normalized stokes parameter.
+        '''
+
+        MakeIntensityMatrix = lambda ThetaHwp,D_Sign : self.MakeIntensityMatrix(ThetaHwp,D_Sign,ThetaDer,Altitude,UsePolarizer,UseSource)
         if(DerotatorMethod):
-            IntensityMatrix = lambda ThetaHwp,D_Sign : self.IntensityMatrix(ThetaDer,D_Sign,ThetaHwp,Altitude,UsePolarizer,UseSource)
+            MakeIntensityMatrix = lambda ThetaHwp,D_Sign : self.MakeIntensityMatrix(ThetaDer,D_Sign,ThetaHwp,Altitude,UsePolarizer,UseSource)
         
         #Find stokes Q
-        XPlus = IntensityMatrix(ThetaHwpPlus,1) - IntensityMatrix(ThetaHwpPlus,-1) #Single difference for two hwp angles
-        XMin = IntensityMatrix(ThetaHwpMin,1) - IntensityMatrix(ThetaHwpMin,-1)
+        XPlus = MakeIntensityMatrix(ThetaHwpPlus,1) - MakeIntensityMatrix(ThetaHwpPlus,-1) #Single difference for two hwp angles
+        XMin = MakeIntensityMatrix(ThetaHwpMin,1) - MakeIntensityMatrix(ThetaHwpMin,-1)
 
-        IPlus = IntensityMatrix(ThetaHwpPlus,1) + IntensityMatrix(ThetaHwpPlus,-1) #Single sum for two hwp angles
-        IMin = IntensityMatrix(ThetaHwpMin,1) + IntensityMatrix(ThetaHwpMin,-1)
+        IPlus = IntensityMatrix(ThetaHwpPlus,1) + MakeIntensityMatrix(ThetaHwpPlus,-1) #Single sum for two hwp angles
+        IMin = MakeIntensityMatrix(ThetaHwpMin,1) + MakeIntensityMatrix(ThetaHwpMin,-1)
         X_Matrix = 0.5*(XPlus-XMin) #Double difference
         I_Matrix = 0.5*(IPlus+IMin) #Double sum
 
         return X_Matrix, I_Matrix
     
+    def DoubleDifferenceMatrix(self,ThetaDer,Altitude,UsePolarizer=False,UseSource=False):
+        '''
+        Summary:     
+            Create a total Mueller matrix acounting for the double difference.
+            This way S_Out = np.dot(PolarizationMatrix,S_In) where we can fully
+            use S_Out except for stokes V(S_Out[3]).
+        Input:
+            ThetaDer: Derotator angle (radians).
+            Altitude: Altitude angle (radians).
+            UsePolarizer: Wheter or not the calibration polarizer is used.
+            UseSource: Wheter or not the internal light source is used
 
-    #Performs double difference with given system parameters
-    def DoubleDifferenceMatrix(self,ThetaDer,Altitude,UsePolarizer=False):
+        Output:
+            Polarization Matrix: 4x4 matrix where every entry related to V is 0.
+        '''
         
         #Find stokes Q and IQ matrices
-        Q_Matrix,IQ_Matrix = self.ParameterMatrix(0,(1/4)*np.pi,ThetaDer,Altitude,UsePolarizer)
+        Q_Matrix,IQ_Matrix = self.ParameterMatrix(0,(1/4)*np.pi,ThetaDer,Altitude,UsePolarizer,UseSource)
 
         #Find stokes Q and IQ matrices
-        U_Matrix,IU_Matrix = self.ParameterMatrix((1/8)*np.pi,(3/8)*np.pi,ThetaDer,Altitude,UsePolarizer)
+        U_Matrix,IU_Matrix = self.ParameterMatrix((1/8)*np.pi,(3/8)*np.pi,ThetaDer,Altitude,UsePolarizer,UseSource)
 
         I_Matrix = 0.5*(IQ_Matrix+IU_Matrix) #IQ should be the same as IU but we average anyway
         
@@ -93,27 +151,41 @@ class MatrixModel():
         
         return PolarizationMatrix
 
-    
-    #Returns an array of normalized stokes parameters over derotator angle.
     #Double difference is done using hwp combinations in HwpTargetList
     def FindParameterArray(self,DerList,S_In,Altitude=0,HwpTargetList=[(0,45),(11.25,56.25),(22.5,67.5),(33.75,78.75)],UsePolarizer=False,DerMethod=False):
  
-        ParmFitValueArray = []
+         '''
+        Summary:     
+            Returns a 2d array of normalized stokes parameters over derotator angle. 
+            This is used to make plots c1,c2,c3 in Holstein et al.
+        Input:
+            DerList: Derotator angles (radians).
+            S_In: Incoming stokes vector. 
+            Altitude: Altitude angle (radians).
+            HwpTargetList: Each tupple in this list is two hwp angles with which to do the double difference.
+            UsePolarizer: Wheter or not the calibration polarizer is used.
+            DerMethod: If True instead array is over hwp angles. HwpTargetList is then DerTargetList.
+
+        Output:
+            ParmValueArray: 2d array of normalized parameter values. First dimension is which Hwp combination is used.
+            second dimension is derotator angle.
+        '''
+        ParmValueArray = []
 
         for HwpTarget in HwpTargetList:
             HwpPlusTarget = HwpTarget[0]*np.pi/180
             HwpMinTarget = HwpTarget[1]*np.pi/180
-            ParmFitValueList = []
+            ParmValueList = []
             for Der in DerList:
                 X_Matrix,I_Matrix = self.ParameterMatrix(HwpPlusTarget,HwpMinTarget,Der,Altitude,UsePolarizer,True,DerMethod)
                 X_Out = np.dot(X_Matrix,S_In)[0]
                 I_Out = np.dot(I_Matrix,S_In)[0]
                 X_Norm = X_Out/I_Out
-                ParmFitValueList.append(X_Norm)
+                ParmValueList.append(X_Norm)
         
-            ParmFitValueArray.append(np.array(ParmFitValueList))
+            ParmValueArray.append(np.array(ParmValueList))
         
-        return np.array(ParmFitValueArray)
+        return np.array(ParmValueArray)
 
 
     #Measures stokes vector for different derotator angles
@@ -224,9 +296,6 @@ def PlotIpDiagram(ModelList,Steps,PlotStokes=False):
     
     
 #--/--Methods--/--#
-
-
-
 
 #-----Main-----#
 Steps = 100

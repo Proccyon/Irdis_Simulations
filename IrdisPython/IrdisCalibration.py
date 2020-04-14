@@ -1,3 +1,8 @@
+#-----Header-----#
+#This file finds the data points used in figure c1,c2 and c3 of Holstein et al. 
+#The data points are found from calibration measurements, half of which use the calibration polarizer.
+#--/--Header--/--#
+
 
 #-----Imports-----#
 import numpy as np
@@ -15,11 +20,33 @@ warnings.filterwarnings('ignore', category=UserWarning, append=True)
 
 #-----Functions-----#
 
-#Takezs the mean of two angles, ex. makes sure (7/4pi,0) goes well
 def CircleMean(Theta1,Theta2):
+        '''
+        Summary:     
+            Takes the mean of two angles, ex. makes sure Mean(7/4pi,0) returns (15/8)pi not (7/8)pi
+        Input:
+            Theta1: First Angle (radians)
+            Theta2: Second Angle (radians), switching Theta1 and Theta2 gives the same result
+
+        Output:
+            CircleMean: Mean of the the two angles
+        '''
     return np.arctan( (np.sin(Theta1)+np.sin(Theta2)) / (np.cos(Theta1)+np.cos(Theta2)) )
     
+
 def CreateAperture(Shape,x0,y0,R):
+        '''
+        Summary:     
+            Creates a circular aperture array of ones within the circle and 0's outside the circle.
+        Input:
+            Shape: Shape of the array
+            x0: x coordinate of aperture centre
+            y0: y coordinate of aperture centre
+            R: Radius of aperture
+
+        Output:
+            Aperture: 2d aperture array
+        '''
     Aperture = np.zeros(Shape)
     for y in range(Shape[0]):
         for x in range(Shape[1]):
@@ -46,10 +73,11 @@ class IrdisCalibration:
         self.HwpTargetList = [(0,45),(11.25,56.25),(22.5,67.5),(33.75,78.75)]
         self.DerTargetList = [(0,45),(11.25,56.25),(22.5,67.5),(33.75,78.75)]
         
-        self.ApertureSize=50
-        self.ApertureXList = [250,450,650,450,450,250,250,650,650]
+        self.ApertureSize=50 #Radius of the apertures
+        self.ApertureXList = [250,450,650,450,450,250,250,650,650]#Aperture positions
         self.ApertureYList = [500,500,500,700,300,300,700,300,700]
 
+        #These variables will be saved as text files using the pickle module
         self.PolParamValueArray_FileName = "C:/Users/Gebruiker/Desktop/BRP/Figures/Irdis_Results/PickleData/PicklePolParamValueArray.txt"
         self.UnpolParamValueArray_FileName = "C:/Users/Gebruiker/Desktop/BRP/Figures/Irdis_Results/PickleData/PickleUnpolParamValueArray.txt"
         self.AlternativeParamValueArray_FileName = "C:/Users/Gebruiker/Desktop/BRP/Figures/Irdis_Results/PickleData/PickleAlternativeParamValueArray.txt"
@@ -112,7 +140,22 @@ class IrdisCalibration:
         pickle.dump(self.AlternativeHwpList,open(self.AlternativeHwpList_FileName,"wb"))
 
     #---ReadFunctions---#
-    def ReadFile(self,File,IsDark=False):    
+    def ReadFile(self,File,IsDark=False):
+        '''
+        Summary:     
+            Reads a given file and returns the images and header data.
+            Is used in reading dark and flat files.
+        Input:
+            File: A .fits file containing irdis data
+            IsDark: DarkFiles contain multiple images. If File is a dark set IsDark to True,
+            then all images will be returned as a list
+
+        Output:
+            RawImage: The unaltered image from the .fits file
+            DerAngle: Derotator angle (degrees)
+            HwpAngle: Half-wave plate angle (degrees)
+            ExpTime: Exposure time (seconds) (is 1s or 2s in this case)
+        '''    
         Header = File[0].header
         if(IsDark):
             RawImage = File[0].data
@@ -132,6 +175,18 @@ class IrdisCalibration:
         return RawImage,DerAngle,HwpAngle,ExpTime
 
     def ReadFileList(self,FileList):
+        '''
+        Summary:     
+            The same function as ReadFile but now for a list of files
+            Is used in reading calibration files.
+        Input:
+            FileList: List of .fits files containing irdis data.
+        Output:
+            RawImageList: Unaltered images from the .fits file
+            DerAngleList: Derotator angles (degrees)
+            HwpAngleList: Half-wave plate angles (degrees)
+            ExpTimeList: Exposure times (seconds) (is 1s or 2s in this case)
+        '''  
 
         RawImageList = []
         Derlist = []
@@ -150,6 +205,20 @@ class IrdisCalibration:
 
     #---EssentialFunctions---#
     def CalibrateNoise(self,RawImageList,ImageExpTimeList,FlatImage,FlatExpTime,DarkImageS,DarkImageF):
+        '''
+        Summary:     
+            Does dark subtraction and flat scaling. Also uses functions from irdap to do bad pixel correction.
+        Input:
+            RawImageList: List of images that will be corrected.
+            ImageExpTimeList: List of exposure times of raw images. Should be the same for all images.
+            FlatImage: Image of flat measurement.
+            FlatExpTime: Exposure time of the flat image.
+            DarkImageS: Dark image with same exposure time as calibration images.
+            DarkImageF: Dark image with same exposure time as flat image.
+        Output:
+            CalibratedImageList: List of images that have been corrected.
+            BadPixelMap: Array of bad pixels. 1 is a bad pixel, 0 a normal pixel(or other way around...?).
+        '''
         MasterFlat = IrdapFunctions.process_dark_flat_frames(DarkImageF,FlatImage,FlatExpTime)
         BadPixelMap = IrdapFunctions.create_bpm_darks(DarkImageF) * IrdapFunctions.create_bpm_darks(DarkImageS)
         CalibratedImageList = (1 /ImageExpTimeList[0])*(RawImageList - DarkImageS) / MasterFlat
@@ -157,12 +226,37 @@ class IrdisCalibration:
         return IrdapFunctions.remove_bad_pixels(CalibratedImageList,BadPixelMap),BadPixelMap
 
     def SplitImageList(self,ImageList):
+        '''
+        Summary:     
+            Splits images in a left and right part.
+        Input:
+            ImageList: List of images that have already been dark subtracted etc.
+        Output:
+            ImageL: List of the left part of images.
+            ImageR: List of the right part of images.
+        '''  
+
         ImageL = ImageList[:,11:1024, 36:932]
         ImageR = ImageList[:,5:1018, 1062:1958]
         return ImageL,ImageR
 
-    #Creates double difference and sum images by combining images differing 45 degrees hwp angle
-    def CreateHwpDoubleDifferenceImges(self,HwpTargetList,TotalHwpList,TotalDerList,ImageListL,ImageListR):
+    def CreateHwpDoubleDifferenceImages(self,HwpTargetList,TotalHwpList,TotalDerList,ImageListL,ImageListR):
+        '''
+        Summary:     
+            Does double difference method by combining images with hwp angles differing 45 degrees.
+            Goes through TotalHwpList to combine images.
+        Input:
+            HwpTargetList: List of Hwp tuples indicating which hwp angles should be combined.
+            TotalHwpList: Hwp angles of images in ImageListL and ImageListR.
+            TotalDerList: Derotator angles of images in ImageListL and ImageListR.
+            ImageListL: List of the left part of calibration images.
+            ImageListR: List of the right part of calibration images.
+
+        Output:
+            DDImageArray: Array of double difference images per hwp combination and derotator angle.
+            DSImageArray: Array of double sum images per hwp combination and derotator angle.
+            DerList: Derotator angles of DDimages,DsImages in DDImageArray and DSImageArray
+        '''  
 
         DDImageArray = []
         DSImageArray = []
@@ -197,6 +291,22 @@ class IrdisCalibration:
 
     #Same as the above function but combines images differing 45 degrees derotator angle
     def CreateDerDoubleDifferenceImges(self,DerTargetList,TotalHwpList,TotalDerList,ImageListL,ImageListR):
+        '''
+        Summary:     
+            Does double difference method by combining images with derotator angles differing 45 degrees.
+            Goes through TotalDerList to combine images.
+        Input:
+            DerTargetList: List of derotator tuples indicating which derotator angles should be combined.
+            TotalHwpList: Hwp angles of images in ImageListL and ImageListR.
+            TotalDerList: Derotator angles of images in ImageListL and ImageListR.
+            ImageListL: List of the left part of calibration images.
+            ImageListR: List of the right part of calibration images.
+
+        Output:
+            DDImageArray: Array of double difference images per derotator combination and hwp angle.
+            DSImageArray: Array of double sum images per derotator combination and hwp angle.
+            HwpList: Hwp angles of DDimages,DsImages in DDImageArray and DSImageArray
+        ''' 
 
         DDImageArray = []
         DSImageArray = []
@@ -232,7 +342,17 @@ class IrdisCalibration:
 
     #Uses aperatures to get a single value for the double differance
     def GetDoubleDifferenceValue(self,DDImageArray,DSImageArray):
-        
+        '''
+        Summary:     
+            Finds a (float) normalized parameter value from the double difference and sum images.
+            Uses 9 circular apertures to find 9 different (but similar)values.
+        Input:
+            DDImageArray: Array of double difference images 
+            DSImageArray: Array of double sum images
+        Output:
+            ParamValueArray: 3d array that lists parameter values per aperture, hwp combination and derotator angle.
+        ''' 
+
         ParamValueArray = []
         for i in range(len(self.ApertureXList)):
             ApertureX = self.ApertureXList[i]
@@ -246,10 +366,23 @@ class IrdisCalibration:
         
 
     def FindFittedStokesParameters(self,Model,HwpTargetList,UsePolarizer,DerMethod=False):
+        '''
+        Summary:     
+            Finds parameter values expected from the model fitted in Holstein et al.
+            Uses methods in Irdis_Model.py
+        Input:
+            Model: Class defined in Irdis_Model.py. Spefifies model parameters used.
+            HwpTargetList: List of hwp anlges that are combined in double difference.
+            UsePolarizer: Wheter or not the calibration polarizer is used.
+            DerMethod: If true, double difference is taken with der angles differing 45 degrees instead of hwp angles.
+        Output:
+            ParamFitValueArray: 2d array that lists parameter values per hwp combination and derotator angle.
+            FitDerList: List of derotator angles of parameter values in ParamFitValueArray
+        ''' 
 
         FitDerList = np.linspace(-2*np.pi/180,103.25*np.pi/180,200)    
         ParmFitValueArray = []
-        S_In = np.array([1,0.009480,0.000406,0])
+        S_In = np.array([1,0.009480,0.000406,0]) #Not completely unpolarized because of M4, see q_in and u_in
 
         for HwpTarget in HwpTargetList:
             HwpPlusTarget = HwpTarget[0]*np.pi/180
